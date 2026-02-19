@@ -1,35 +1,30 @@
 from fastapi import FastAPI, UploadFile, File, Depends, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 import shutil
 import os
-from auth import get_current_user, login, signup
+from auth import get_current_user, router as auth_router
 from utils import validate_pdf, UPLOAD_FOLDER, logger
-from database import reports, users
-from models import UserLogin
+from database import reports
 from extractor import extract_text_from_pdf
 from fraud_checker import analyze_resume_text
 
 app = FastAPI(title="Resume Fraud Detection")
 
-# ---------------- Signup ----------------
-@app.post("/signup")
-def signup_user(data: UserLogin):
-    # Check if username exists
-    existing_user = next((u for u in users if u["username"] == data.username), None)
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Username already exists")
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-    # Add new user
-    new_user = {"username": data.username, "password": data.password, "role": "user"}
-    users.append(new_user)
-    return {"message": "User created successfully", "username": data.username, "role": "user"}
+app.include_router(auth_router)
 
-# ---------------- Login ----------------
-@app.post("/login")
-def login_user(data: UserLogin):
-    user = next((u for u in users if u["username"] == data.username and u["password"] == data.password), None)
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid username or password")
-    return {"message": "Login successful", "username": user["username"], "role": user["role"]}
+# ---------------- Get User Profile ----------------
+@app.get("/getuser")
+def get_user_profile(current_user: dict = Depends(get_current_user)):
+    return current_user
 
 # ---------------- Upload Resume ----------------
 @app.post("/upload-resume")
@@ -53,29 +48,31 @@ async def upload_resume(file: UploadFile = File(...), current_user: dict = Depen
 
 # ---------------- Analyze Resume ----------------
 @app.post("/analyze")
-def analyze_resume(filename: str):
-    # Check if file exists
-    file_path = f"{UPLOAD_FOLDER}/{filename}"
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail=f"Resume '{filename}' not found")
-    
+async def analyze_resume(file: UploadFile = File(...)):
     try:
-        # Extract text from PDF
-        text = extract_text_from_pdf(file_path)
+        # Save temporary file
+        temp_path = f"{UPLOAD_FOLDER}/temp_{file.filename}"
+        with open(temp_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
         
+        # Extract text from PDF
+        text = extract_text_from_pdf(temp_path)
+        
+        # Clean up temp file
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
         if not text.strip():
             raise HTTPException(status_code=400, detail="Could not extract text from PDF")
         
         # Analyze resume for fraud
         analysis_results = analyze_resume_text(text)
         
-        logger.info(f"Analyzed resume: {filename}")
+        logger.info(f"Analyzed resume: {file.filename}")
         return analysis_results
     
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Error analyzing resume {filename}: {str(e)}")
+        logger.error(f"Error analyzing resume {file.filename}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error analyzing resume: {str(e)}")
 
 # ---------------- Reports (Admin Only) ----------------

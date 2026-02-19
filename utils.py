@@ -29,6 +29,9 @@ def create_token(user):
 def decode_token(token: str):
     try:
         payload = base64.b64decode(token.encode()).decode()
-        return json.loads(payload)
+        data = json.loads(payload)
+        if "username" not in data or "role" not in data:
+            raise HTTPException(status_code=401, detail="Invalid token payload")
+        return data
     except Exception:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise HTTPException(status_code=401, detail="Invalid token or authentication failed")

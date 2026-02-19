@@ -1,12 +1,12 @@
 # auth.py
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from database import users
 from models import UserLogin
 from utils import create_token, decode_token
 
 router = APIRouter()
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 
 # Signup route (only for new users, admin must be pre-defined)
 @router.post("/signup")
@@ -24,7 +24,7 @@ def signup(data: UserLogin):
 
 # Login route
 @router.post("/login")
-def login(data: UserLogin):
+def login(data: OAuth2PasswordRequestForm = Depends()):
     user = next((u for u in users if u["username"] == data.username and u["password"] == data.password), None)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid username or password")
