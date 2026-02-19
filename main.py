@@ -1,9 +1,12 @@
 from fastapi import FastAPI, UploadFile, File, Depends, HTTPException
 import shutil
+import os
 from auth import get_current_user, login, signup
 from utils import validate_pdf, UPLOAD_FOLDER, logger
 from database import reports, users
 from models import UserLogin
+from extractor import extract_text_from_pdf
+from fraud_checker import analyze_resume_text
 
 app = FastAPI(title="Resume Fraud Detection")
 
@@ -47,6 +50,33 @@ async def upload_resume(file: UploadFile = File(...), current_user: dict = Depen
     logger.info(f"{current_user['username']} uploaded {file.filename}")
 
     return {"message": f"{file.filename} uploaded successfully", "uploaded_by": current_user["username"]}
+
+# ---------------- Analyze Resume ----------------
+@app.post("/analyze")
+def analyze_resume(filename: str):
+    # Check if file exists
+    file_path = f"{UPLOAD_FOLDER}/{filename}"
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail=f"Resume '{filename}' not found")
+    
+    try:
+        # Extract text from PDF
+        text = extract_text_from_pdf(file_path)
+        
+        if not text.strip():
+            raise HTTPException(status_code=400, detail="Could not extract text from PDF")
+        
+        # Analyze resume for fraud
+        analysis_results = analyze_resume_text(text)
+        
+        logger.info(f"Analyzed resume: {filename}")
+        return analysis_results
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error analyzing resume {filename}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error analyzing resume: {str(e)}")
 
 # ---------------- Reports (Admin Only) ----------------
 @app.get("/reports")
